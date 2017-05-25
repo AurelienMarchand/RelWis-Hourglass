@@ -3,8 +3,9 @@
 error_reporting(-1);
 ini_set('display_errors','stdout');
 
-$file = 'hourglass-export.json';
-$sqlite = 'hourglass.db';
+$hourglass_input = 'hourglass-export.json';
+$sqlite_db = 'hourglass.db';
+$additions_source = 'additions.json';
 
 try {
 	ob_start();
@@ -13,13 +14,13 @@ try {
 	{
 	case 'readfile':
 		// send to output buffer the content of the file
-		readfile($file);
+		readfile($hourglass_input);
 		break;
 	case 'importfile':
-		echo json_encode(importfile($file,$sqlite));
+		echo json_encode(importfile($hourglass_input,$sqlite_db));
 		break;
 	case 'report':
-		echo json_encode(createreport($sqlite));
+		echo json_encode(createreport($sqlite_db));
 	default:
 		break;
 	}
@@ -103,6 +104,7 @@ function importfile($file,$dbname)
 		if(!isset($u->cellphone)) $u->cellphone = NULL;
 		if(!isset($u->firstmonth)) $u->firstmonth = NULL;
 		if(!isset($u->t_address_id)) $u->t_address_id = NULL;
+		if(!isset($u->t_group_id)) $u->t_group_id = NULL;
 
 		$stmt_users->bindValue(':t_id',			$u->t_id,			SQLITE3_INTEGER);
 		$stmt_users->bindValue(':t_group_id',	$u->t_group_id,		SQLITE3_INTEGER);
@@ -150,7 +152,7 @@ function importfile($file,$dbname)
 
 function createreport($dbname)
 {
-	function arrange_group($g,$exceptions)
+	function arrange_group($g,$additions)
 	{
 		// in this array are multiple records found at the same address
 		// we also know they share the same lastname
@@ -165,7 +167,7 @@ function createreport($dbname)
 			$res['address'] = $r['line1'] . ($r['line2']?", {$r['line2']}":"") . "\\n" . $r['city'] . " " . $r['state'] . " " . $r['postalcode'] . ($r['homephone']?"\\n\\nTel: {$r['homephone']}":"");
 		}
 		// add the exceptions if applicable
-		if(in_array($res['lastname'],array_keys($exceptions))) $res['firstnames'] = array_merge($res['firstnames'],$exceptions[$res['lastname']]);
+		if(in_array($res['lastname'],array_keys($additions))) $res['firstnames'] = array_merge($res['firstnames'],$additions[$res['lastname']]);
 
 		return $res;
 	}
@@ -189,17 +191,11 @@ function createreport($dbname)
 	if(!$s_s) throw new Exception('Error in select query');
 	$cur_add = '';
 
-	// we have exceptions to the list, in particular missing kids since they are not yet publisher hence not tracked in Hourglass
-	$exceptions = [
-		"Baky" => ["Anaïs"],
-		"Charlot" => ["Brandgy","Darren"],
-		"Dort" => ["Mia","Ian"],
-		"Kamwanga" => ["Roxanne"],
-		"Lavoile" => ["Kervins"],
-		"Marchand" => ["Rémi","Lucy"],
-		"Ogunjobi" => ["Teniola"],
-		"Sainvilus" => ["Joevanny"]
-	];
+	// we have additions to the list, in particular missing kids since they are not yet publisher hence not tracked in Hourglass
+	$tmp = file_get_contents($additions_source);
+	if($tmp === FALSE) throw new Exception('Failed to read additions from ' . $additions_source);
+	if(!$tmp) $additions = []; else $additions = json_decode($tmp);
+	if(!$additions) throw new Exception('Failed to decode the additions, probably a formatting error');
 
 	$res = [];
 	$group = [];
@@ -207,13 +203,13 @@ function createreport($dbname)
 	{
 		if($s_a['t_address_id'] != $cur_add)
 		{
-			if(count($group)) $res[] = arrange_group($group,$exceptions);
+			if(count($group)) $res[] = arrange_group($group,$additions);
 			$group = [];
 		}
 		$group[] = $s_a;
 		$cur_add = $s_a['t_address_id'];
 	}
-	$res[] = arrange_group($group,$exceptions);
+	$res[] = arrange_group($group,$additions);
 
 	return array("status" => "success", "result" => $res);
 }
